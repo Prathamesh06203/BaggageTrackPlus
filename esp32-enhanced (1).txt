@@ -1,0 +1,211 @@
+#include <Arduino.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+#include <TinyGPS++.h>
+#include <esp_wifi.h>
+#include <esp_bt.h>
+#include <time.h>
+#include <JWT.h>
+
+// WiFi and Server settings
+const char* ssid = "YOUR_WIFI_SSID";
+const char* password = "YOUR_WIFI_PASSWORD";
+const char* serverUrl = "http://your-server:5000/api/location";
+const char* jwt_secret = "your-secret-key";  // For JWT token generation
+
+// GPS Module pins
+#define GPS_RX 34
+#define GPS_TX 12
+
+// Battery monitoring
+#define BATTERY_PIN 35
+const float BATTERY_THRESHOLD = 3.3;  // Voltage threshold for low battery
+
+// Deep sleep settings
+#define uS_TO_S_FACTOR 1000000ULL  // Conversion factor for seconds to microseconds
+#define TIME_TO_SLEEP 60           // Sleep time in seconds
+
+// GPS and serial objects
+TinyGPSPlus gps;
+HardwareSerial GPSSerial(1);
+
+// State variables
+bool lowBatteryMode = false;
+unsigned long lastTransmissionTime = 0;
+const unsigned long TRANSMISSION_INTERVAL = 10000;  // 10 seconds
+float lastLat = 0, lastLon = 0;
+const float MOVEMENT_THRESHOLD = 0.0001;  // Minimum movement to trigger update
+
+// Function declarations
+void setupWiFi();
+void enterDeepSleep();
+float getBatteryVoltage();
+String generateJWT();
+bool significantMovement(float newLat, float newLon);
+void handleGPSError();
+void sendLocationData(double latitude, double longitude);
+
+void setup() {
+    Serial.begin(115200);
+    
+    // Initialize power management
+    esp_bt_controller_disable();  // Disable Bluetooth to save power
+    
+    // Initialize GPS
+    GPSSerial.begin(9600, SERIAL_8N1, GPS_RX, GPS_TX);
+    
+    // Check battery before proceeding
+    float batteryVoltage = getBatteryVoltage();
+    if (batteryVoltage < BATTERY_THRESHOLD) {
+        lowBatteryMode = true;
+        Serial.println("Low battery mode activated");
+    }
+    
+    setupWiFi();
+}
+
+void setupWiFi() {
+    WiFi.mode(WIFI_STA);  // Set WiFi to station mode
+    WiFi.begin(ssid, password);
+    
+    int attempts = 0;
+    while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+        delay(500);
+        Serial.print(".");
+        attempts++;
+    }
+    
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("WiFi connection failed, entering deep sleep");
+        enterDeepSleep();
+    }
+    
+    // Reduce WiFi power
+    esp_wifi_set_ps(WIFI_PS_MAX_MODEM);
+}
+
+String generateJWT() {
+    JWT jwt;
+    jwt.setSecret(jwt_secret);
+    
+    // Create JWT payload
+    StaticJsonDocument<200> payload;
+    payload["device_id"] = "TTGO-01";
+    payload["iat"] = time(nullptr);
+    payload["exp"] = time(nullptr) + 3600;  // 1 hour expiration
+    
+    String token;
+    jwt.encodeJWT(payload, token);
+    return token;
+}
+
+bool significantMovement(float newLat, float newLon) {
+    if (lastLat == 0 && lastLon == 0) return true;
+    
+    float latDiff = abs(newLat - lastLat);
+    float lonDiff = abs(newLon - lastLon);
+    
+    return (latDiff > MOVEMENT_THRESHOLD || lonDiff > MOVEMENT_THRESHOLD);
+}
+
+void sendLocationData(double latitude, double longitude) {
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("WiFi disconnected, reconnecting...");
+        setupWiFi();
+        return;
+    }
+    
+    HTTPClient http;
+    String jwt = generateJWT();
+    
+    // Create JSON document
+    StaticJsonDocument<300> doc;
+    doc["latitude"] = latitude;
+    doc["longitude"] = longitude;
+    doc["timestamp"] = millis();
+    doc["device_id"] = "TTGO-01";
+    doc["battery_voltage"] = getBatteryVoltage();
+    doc["low_battery_mode"] = lowBatteryMode;
+    
+    String jsonString;
+    serializeJson(doc, jsonString);
+    
+    // Send POST request
+    http.begin(serverUrl);
+    http.addHeader("Content-Type", "application/json");
+    http.addHeader("Authorization", "Bearer " + jwt);
+    
+    int httpResponseCode = http.POST(jsonString);
+    
+    if (httpResponseCode > 0) {
+        Serial.printf("HTTP Response code: %d\n", httpResponseCode);
+    } else {
+        Serial.printf("Error code: %d\n", httpResponseCode);
+        handleGPSError();
+    }
+    
+    http.end();
+}
+
+float getBatteryVoltage() {
+    return (analogRead(BATTERY_PIN) / 4095.0) * 2 * 3.3 * 1.1;
+}
+
+void handleGPSError() {
+    static int errorCount = 0;
+    errorCount++;
+    
+    if (errorCount > 5) {
+        Serial.println("Too many GPS errors, entering deep sleep");
+        enterDeepSleep();
+    }
+}
+
+void enterDeepSleep() {
+    Serial.println("Entering deep sleep");
+    esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
+    esp_deep_sleep_start();
+}
+
+void loop() {
+    unsigned long currentMillis = millis();
+    
+    // Check battery voltage
+    float batteryVoltage = getBatteryVoltage();
+    if (batteryVoltage < BATTERY_THRESHOLD) {
+        lowBatteryMode = true;
+    }
+    
+    // Read GPS data
+    while (GPSSerial.available() > 0) {
+        if (gps.encode(GPSSerial.read())) {
+            if (gps.location.isValid()) {
+                double latitude = gps.location.lat();
+                double longitude = gps.location.lng();
+                
+                // Check if enough time has passed or significant movement
+                if (currentMillis - lastTransmissionTime >= 
+                    (lowBatteryMode ? TRANSMISSION_INTERVAL * 6 : TRANSMISSION_INTERVAL) &&
+                    significantMovement(latitude, longitude)) {
+                    
+                    Serial.printf("Lat: %.6f, Lon: %.6f\n", latitude, longitude);
+                    sendLocationData(latitude, longitude);
+                    
+                    lastTransmissionTime = currentMillis;
+                    lastLat = latitude;
+                    lastLon = longitude;
+                }
+            }
+        }
+    }
+    
+    // Enter light sleep between readings in low battery mode
+    if (lowBatteryMode) {
+        WiFi.disconnect(true);
+        delay(100);
+        esp_light_sleep_start();
+    }
+    
+    delay(1000);
+}
