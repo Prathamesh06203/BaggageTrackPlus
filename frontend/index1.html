@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced GPS Dashboard</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.7.0/chart.min.js"></script>
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <style>
+        :root {
+            --primary-bg: #0B1120;
+            --card-bg: #1A1F35;
+            --accent-primary: #6D28D9;
+            --accent-secondary: #4F46E5;
+            --text-primary: #E2E8F0;
+            --text-secondary: #94A3B8;
+        }
+
+        body {
+            background: linear-gradient(135deg, var(--primary-bg) 0%, #1E1B4B 100%);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        .glassmorphism {
+            background: rgba(26, 31, 53, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(109, 40, 217, 0.1);
+        }
+
+        .neon-border {
+            position: relative;
+        }
+
+        .neon-border::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            border-radius: inherit;
+            padding: 1px;
+            background: linear-gradient(45deg, var(--accent-primary), var(--accent-secondary));
+            mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+            -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+            -webkit-mask-composite: destination-out;
+            mask-composite: exclude;
+        }
+
+        .device-card {
+            transition: all 0.3s ease;
+        }
+
+        .device-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 0 25px rgba(109, 40, 217, 0.2);
+        }
+
+        .gradient-text {
+            background: linear-gradient(45deg, var(--accent-primary), var(--accent-secondary));
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+        }
+
+        /* Rest of the styles from previous version... */
+    </style>
+</head>
+<body>
+    <div class="container mx-auto px-4 py-8">
+        <!-- Header -->
+        <div class="mb-8 text-center">
+            <h1 class="text-5xl font-bold gradient-text mb-4">GPS Fleet Dashboard</h1>
+            
+            <!-- Device Filters -->
+            <div class="mb-6 flex flex-wrap justify-center gap-4">
+                <select id="groupFilter" class="glassmorphism px-4 py-2 rounded-lg text-indigo-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    <option value="">All Groups</option>
+                </select>
+                <select id="typeFilter" class="glassmorphism px-4 py-2 rounded-lg text-indigo-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    <option value="">All Types</option>
+                </select>
+                <input type="text" id="searchDevice" placeholder="Search devices..." 
+                       class="glassmorphism px-4 py-2 rounded-lg text-indigo-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            </div>
+        </div>
+
+        <!-- Device Grid -->
+        <div id="deviceGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+            <!-- Device cards will be inserted here -->
+        </div>
+
+        <!-- Selected Device Details -->
+        <div id="deviceDetails" class="hidden">
+            <!-- Device Info Header -->
+            <div class="glassmorphism rounded-lg p-6 mb-8 neon-border">
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div class="text-center">
+                        <h3 class="text-indigo-300 text-sm">Device Name</h3>
+                        <p id="selectedDeviceName" class="text-xl font-bold gradient-text">--</p>
+                    </div>
+                    <div class="text-center">
+                        <h3 class="text-indigo-300 text-sm">Status</h3>
+                        <p id="selectedDeviceStatus" class="text-xl font-bold">--</p>
+                    </div>
+                    <div class="text-center">
+                        <h3 class="text-indigo-300 text-sm">Battery</h3>
+                        <p id="selectedDeviceBattery" class="text-xl font-bold">--</p>
+                    </div>
+                    <div class="text-center">
+                        <h3 class="text-indigo-300 text-sm">Last Updated</h3>
+                        <p id="selectedDeviceLastSeen" class="text-xl font-bold">--</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Charts and Map Grid -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                <!-- Sensor Charts -->
+                <div class="glassmorphism rounded-lg p-6 neon-border">
+                    <h2 class="text-lg font-semibold mb-4 text-indigo-300">Sensor Data</h2>
+                    <div class="space-y-6">
+                        <div class="h-64">
+                            <canvas id="accelerationChart"></canvas>
+                        </div>
+                        <div class="h-64">
+                            <canvas id="temperatureChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Map -->
+                <div class="glassmorphism rounded-lg p-6 neon-border">
+                    <h2 class="text-lg font-semibold mb-4 text-indigo-300">Location</h2>
+                    <div id="map" class="h-[500px] rounded-lg"></div>
+                </div>
+            </div>
+
+            <!-- Additional Metrics -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <div class="glassmorphism rounded-lg p-6 neon-border">
+                    <h3 class="text-indigo-300 text-sm">Speed</h3>
+                    <p id="deviceSpeed" class="text-2xl font-bold gradient-text">-- km/h</p>
+                </div>
+                <div class="glassmorphism rounded-lg p-6 neon-border">
+                    <h3 class="text-indigo-300 text-sm">Altitude</h3>
+                    <p id="deviceAltitude" class="text-2xl font-bold gradient-text">-- m</p>
+                </div>
+                <div class="glassmorphism rounded-lg p-6 neon-border">
+                    <h3 class="text-indigo-300 text-sm">Heading</h3>
+                    <p id="deviceHeading" class="text-2xl font-bold gradient-text">-- °</p>
+                </div>
+                <div class="glassmorphism rounded-lg p-6 neon-border">
+                    <h3 class="text-indigo-300 text-sm">Signal Strength</h3>
+                    <p id="deviceSignal" class="text-2xl font-bold gradient-text">-- %</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Main application state
+        let devices = new Map();
+        let selectedDevice = null;
+        let charts = {};
+        let map = null;
+        let marker = null;
+        let websocket = null;
+
+        // Initialize application
+        async function initializeApp() {
+            await loadGroups();
+            await loadDevices();
+            initializeCharts();
+            initializeMap();
+            setupEventListeners();
+        }
+
+        // Load device groups
+        async function loadGroups() {
+            try {
+                const response = await fetch('http://localhost:5000/api/groups');
+                const groups = await response.json();
+                const groupSelect = document.getElementById('groupFilter');
+                groups.forEach(group => {
+                    const option = document.createElement('option');
+                    option.value = group;
+                    option.textContent = group;
+                    groupSelect.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Failed to load groups:', error);
+            }
+        }
+
+        // Load and render devices
+        async function loadDevices() {
+            try {
+                const response = await fetch('http://localhost:5000/api/devices');
+                const deviceList = await response.json();
+                deviceList.forEach(device => {
+                    devices.set(device.id, device);
+                });
+                renderDeviceGrid();
+            } catch (error) {
+                console.error('Failed to load devices:', error);
+            }
+        }
+
+        // Render device grid
+        function renderDeviceGrid() {
+            const grid = document.getElementById('devicesGrid');
+            grid.innerHTML = ''; 
+
+            devices.forEach(device => {
+                const card = document.createElement('div');
+                card.className = 'glassmorphism p-4 rounded-lg device-card neon-border';
+                card.innerHTML = `
+                    <h3 class="text-lg font-semibold gradient-text">${device.name}</h3>
+                    <p class="text-indigo-300">Status: ${device.status}</p>
+                    <p class="text-indigo-300">Battery: ${device.battery}%</p>
+                    <button class="mt-4 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg">
+                        View Details
+                    </button>
+                `;
+                card.querySelector('button').addEventListener('click', () => selectDevice(device.id));
+                grid.appendChild(card);
+            });
+        }
+
+        // Select and display device details
+        function selectDevice(deviceId) {
+            selectedDevice = devices.get(deviceId);
+
+            if (!selectedDevice) return;
+
+            // Update device details section
+            document.getElementById('selectedDeviceName').textContent = selectedDevice.name;
+            document.getElementById('selectedDeviceStatus').textContent = selectedDevice.status;
+            document.getElementById('selectedDeviceBattery').textContent = `${selectedDevice.battery}%`;
+            document.getElementById('selectedDeviceLastSeen').textContent = selectedDevice.lastUpdated;
+
+            document.getElementById('deviceSpeed').textContent = `${selectedDevice.speed || '--'} km/h`;
+            document.getElementById('deviceAltitude').textContent = `${selectedDevice.altitude || '--'} m`;
+            document.getElementById('deviceHeading').textContent = `${selectedDevice.heading || '--'} °`;
+            document.getElementById('deviceSignal').textContent = `${selectedDevice.signalStrength || '--'} %`;
+
+            updateCharts(selectedDevice.sensorData);
+            updateMap(selectedDevice.location);
+
+            document.getElementById('deviceDetails').classList.remove('hidden');
+        }
+
+        // Initialize charts
+        function initializeCharts() {
+            const accelerationCtx = document.getElementById('accelerationChart').getContext('2d');
+            const temperatureCtx = document.getElementById('temperatureChart').getContext('2d');
+
+            charts.acceleration = new Chart(accelerationCtx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Acceleration (m/s²)',
+                        data: [],
+                        borderColor: 'rgba(109, 40, 217, 1)',
+                        backgroundColor: 'rgba(109, 40, 217, 0.2)',
+                        fill: true,
+                    }]
+                },
+                options: { responsive: true }
+            });
+
+            charts.temperature = new Chart(temperatureCtx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Temperature (°C)',
+                        data: [],
+                        borderColor: 'rgba(79, 70, 229, 1)',
+                        backgroundColor: 'rgba(79, 70, 229, 0.2)',
+                        fill: true,
+                    }]
+                },
+                options: { responsive: true }
+            });
+        }
+
+        // Update charts with sensor data
+        function updateCharts(sensorData) {
+            if (!sensorData) return;
+
+            charts.acceleration.data.labels = sensorData.time;
+            charts.acceleration.data.datasets[0].data = sensorData.acceleration;
+            charts.acceleration.update();
+
+            charts.temperature.data.labels = sensorData.time;
+            charts.temperature.data.datasets[0].data = sensorData.temperature;
+            charts.temperature.update();
+        }
+
+        // Initialize map
+        function initializeMap() {
+            map = L.map('map').setView([0, 0], 13);
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19
+            }).addTo(map);
+
+            marker = L.marker([0, 0]).addTo(map);
+        }
+
+        // Update map with location data
+        function updateMap(location) {
+            if (!location) return;
+
+            const { lat, lng } = location;
+            map.setView([lat, lng], 13);
+            marker.setLatLng([lat, lng]);
+        }
+
+        // Set up event listeners
+        function setupEventListeners() {
+            document.getElementById('groupFilter').addEventListener('change', filterDevices);
+            document.getElementById('typeFilter').addEventListener('change', filterDevices);
+            document.getElementById('searchDevice').addEventListener('input', filterDevices);
+        }
+
+        // Filter devices based on user input
+        function filterDevices() {
+            const group = document.getElementById('groupFilter').value;
+            const type = document.getElementById('typeFilter').value;
+            const search = document.getElementById('searchDevice').value.toLowerCase();
+
+            const filteredDevices = Array.from(devices.values()).filter(device => {
+                return (
+                    (!group || device.group === group) &&
+                    (!type || device.type === type) &&
+                    (!search || device.name.toLowerCase().includes(search))
+                );
+            });
+
+            devices = new Map(filteredDevices.map(device => [device.id, device]));
+            renderDeviceGrid();
+        }
+
+        // Initialize the application when the page loads
+        document.addEventListener('DOMContentLoaded', initializeApp);
+    </script>
+</body>
+</html>
