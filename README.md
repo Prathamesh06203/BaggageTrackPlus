@@ -1,4 +1,3 @@
-Here’s a complete **README.md** file with everything integrated. You can copy and paste it directly into your project:
 
 ---
 
