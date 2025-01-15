@@ -5,7 +5,7 @@ BaggageTrackPlus is an innovative solution designed to simplify and enhance the 
 ---
 
 <div style="display: flex; justify-content: space-between;">
-  <img src="https://media.giphy.com/media/3o7abldj0b3rxrZUxW/giphy.gif" alt="BaggageTrackPlus Demo 1" width="45%">
+  <img src="https://media.giphy.com/media/26tn33aiTi1jkl6H6/giphy.gif?cid=790b7611f1qesrl6yqhlmtzx9t0rkfp6clejnrn74761npx8&ep=v1_gifs_search&rid=giphy.gif&ct=g" alt="BaggageTrackPlus Demo 1" width="45%">
   <img src="https://media.giphy.com/media/L1R1tvI9svkIWwpVYr/giphy.gif?cid=790b7611xl44rqrovdo6howl8xrclxmpwnjrihpe8ndzehk7&ep=v1_gifs_search&rid=giphy.gif&ct=g" alt="BaggageTrackPlus Demo 2" width="45%">
 </div>
 
