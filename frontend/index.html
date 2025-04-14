@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sensor Dashboard</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.7.0/chart.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.4.0/jspdf.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.7.1/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.7.1/dist/leaflet.css">
+    <script src="https://rawgit.com/zakjan/leaflet-image/gh-pages/leaflet-image.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/leaflet-image@latest/leaflet-image.min.js"></script>
+
+    <style>
+        body {
+            font-family: 'Roboto', sans-serif;
+            background: linear-gradient(135deg, #2a2a72, #009ffd);
+            color: #fff;
+            margin: 0;
+            padding: 0;
+            overflow-x: hidden;
+        }
+        .header {
+            text-align: center;
+            padding: 20px;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 50px;
+            animation: fadeInDown 2s;
+        }
+        .header h1 {
+            font-size: 2.5rem;
+            margin: 0;
+            color: #fff;
+        }
+        .header nav a {
+            text-decoration: none;
+            color: #fff;
+            margin: 0 15px;
+            font-weight: bold;
+            font-size: 1rem;
+            transition: color 0.3s;
+        }
+        .header nav a:hover {
+            color: #00ffff;
+        }
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            padding: 20px;
+        }
+        .chart-container {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 15px;
+            padding: 15px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+            animation: fadeIn 2s;
+        }
+        .map-container {
+            grid-column: span 2;
+            height: 400px;
+            border-radius: 15px;
+            background: rgba(0, 0, 0, 0.5);
+            overflow: hidden;
+            animation: fadeInUp 2s;
+        }
+        .device-input {
+            text-align: center;
+            margin: 20px 0;
+        }
+        .device-input input {
+            padding: 10px;
+            font-size: 1rem;
+            border: none;
+            border-radius: 5px;
+            margin-right: 10px;
+        }
+        .device-input button {
+            padding: 10px 20px;
+            font-size: 1rem;
+            border: none;
+            border-radius: 5px;
+            background-color: #00bcd4;
+            color: #fff;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        .device-input button:hover {
+            background-color: #008c9e;
+        }
+        canvas {
+            max-height: 300px;
+        }
+        @keyframes bgShift {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+        body {
+            animation: bgShift 15s infinite;
+            background-size: 200% 200%;
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <h1>Sensor & GPS Data Dashboard</h1>
+        <nav>
+            <a href="#">Home</a>
+            <a href="#">Contact Us</a>
+            <a href="#">Report</a>
+            <a href="#" onclick="downloadReport()">Download Report</a>
+        </nav>
+    </header>
+    <div class="device-input">
+        <input type="text" id="deviceID" placeholder="Enter Device ID">
+        <button onclick="fetchData()">Load Data</button>
+    </div>
+    <div class="container">
+        <div class="chart-container">
+            <canvas id="accelerationChart"></canvas>
+        </div>
+        <div class="chart-container">
+            <canvas id="temperatureChart"></canvas>
+        </div>
+        <div class="map-container" id="map"></div>
+    </div>
+
+    <script>
+        let accelerationChart, temperatureChart, map, marker;
+
+        function initCharts() {
+            const accCtx = document.getElementById('accelerationChart').getContext('2d');
+            accelerationChart = new Chart(accCtx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        { label: 'X', data: [], borderColor: 'red', borderWidth: 2, tension: 0.3 },
+                        { label: 'Y', data: [], borderColor: 'blue', borderWidth: 2, tension: 0.3 },
+                        { label: 'Z', data: [], borderColor: 'green', borderWidth: 2, tension: 0.3 }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: { display: true, labels: { color: '#fff', font: { weight: 'bold' } } },
+                        tooltip: { callbacks: { label: context => `${context.dataset.label}: ${context.raw.toFixed(2)} m/s²` } }
+                    },
+                    animation: { duration: 1000 },
+                    scales: { x: { ticks: { color: '#fff' } }, y: { ticks: { color: '#fff' } } }
+                }
+            });
+
+            const tempCtx = document.getElementById('temperatureChart').getContext('2d');
+            temperatureChart = new Chart(tempCtx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{ label: 'Temperature', data: [], borderColor: 'orange', borderWidth: 2, tension: 0.3 }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: { display: true, labels: { color: '#fff', font: { weight: 'bold' } } },
+                        tooltip: { callbacks: { label: context => `Temperature: ${context.raw.toFixed(2)} °C` } }
+                    },
+                    animation: { duration: 1000 },
+                    scales: { x: { ticks: { color: '#fff' } }, y: { ticks: { color: '#fff' } } }
+                }
+            });
+        }
+
+        function initMap() {
+            map = L.map('map').setView([0, 0], 2);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+            marker = L.marker([0, 0]).addTo(map);
+        }
+
+        function fetchData() {
+            const deviceID = document.getElementById('deviceID').value;
+            if (!deviceID) {
+                alert('Please enter a Device ID.');
+                return;
+            }
+
+            fetch(`http://localhost:5000/api/data?device_id=${deviceID}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.sensor_data) updateSensorCharts(data.sensor_data);
+                    if (data.gps_data) updateGPSMap(data.gps_data);
+                })
+                .catch(error => console.error('Error fetching data:', error));
+        }
+
+        function updateSensorCharts(data) {
+            const timestamp = new Date(data.timestamp).toLocaleTimeString();
+            accelerationChart.data.labels.push(timestamp);
+            accelerationChart.data.datasets[0].data.push(data.acceleration.x);
+            accelerationChart.data.datasets[1].data.push(data.acceleration.y);
+            accelerationChart.data.datasets[2].data.push(data.acceleration.z);
+            accelerationChart.update();
+
+            temperatureChart.data.labels.push(timestamp);
+            temperatureChart.data.datasets[0].data.push(data.temperature);
+            temperatureChart.update();
+        }
+
+//         function updateSensorCharts(data) {
+//     const timestamp = new Date(data.timestamp).toLocaleTimeString();
+//     accelerationChart.data.labels.push(timestamp);
+//     accelerationChart.data.datasets[0].data.push(data.acceleration.x);
+//     accelerationChart.data.datasets[1].data.push(data.acceleration.y);
+//     accelerationChart.data.datasets[2].data.push(data.acceleration.z);
+//     accelerationChart.update();
+
+//     temperatureChart.data.labels.push(timestamp);
+//     temperatureChart.data.datasets[0].data.push(data.temperature);
+//     temperatureChart.update();
+
+//     // Update real-time values
+//     document.querySelector('#realTimeData').innerHTML = `
+//         <p><strong>Temperature:</strong> ${data.temperature.toFixed(2)} °C</p>
+//         <p><strong>Acceleration:</strong> X: ${data.acceleration.x.toFixed(2)}, Y: ${data.acceleration.y.toFixed(2)}, Z: ${data.acceleration.z.toFixed(2)}</p>
+//         <p><strong>Timestamp:</strong> ${timestamp}</p>
+//     `;
+// }
+
+// function initRealTimeSection() {
+//     const container = document.createElement('div');
+//     container.id = 'realTimeData';
+//     container.style.animation = 'fadeIn 2s';
+//     document.body.appendChild(container);
+// }
+
+
+        function updateGPSMap(data) {
+            const position = [data.latitude, data.longitude];
+            marker.setLatLng(position);
+            map.setView(position, 15);
+        }
+
+//         function downloadReport() {
+//     const deviceID = document.getElementById('deviceID').value;
+//     if (!deviceID) {
+//         alert('Please enter a Device ID before downloading the report.');
+//         return;
+//     }
+
+//     fetch(`http://localhost:5000/api/data?device_id=${deviceID}`)
+//         .then(response => response.json())
+//         .then(data => {
+//             const { jsPDF } = window.jspdf;
+//             const doc = new jsPDF();
+
+//             // Add background
+//             doc.setFillColor(0, 0, 0);
+//             doc.rect(0, 0, 210, 297, 'F');
+
+//             // Add title
+//             doc.setTextColor(255, 255, 255);
+//             doc.setFontSize(16);
+//             doc.text('Baggage Report', 105, 20, { align: 'center' });
+
+//             // Add user details
+//             doc.setFontSize(12);
+//             doc.text(`Device ID: ${deviceID}`, 20, 40);
+//             doc.text(`Temperature: ${data.sensor_data.temperature.toFixed(2)} °C`, 20, 50);
+//             doc.text(`Acceleration X: ${data.sensor_data.acceleration.x.toFixed(2)} m/s²`, 20, 60);
+//             doc.text(`Acceleration Y: ${data.sensor_data.acceleration.y.toFixed(2)} m/s²`, 20, 70);
+//             doc.text(`Acceleration Z: ${data.sensor_data.acceleration.z.toFixed(2)} m/s²`, 20, 80);
+
+//             // Add GPS details
+//             if (data.gps_data) {
+//                 doc.text(`Last Location:`, 20, 100);
+//                 doc.text(`Latitude: ${data.gps_data.latitude.toFixed(6)}`, 20, 110);
+//                 doc.text(`Longitude: ${data.gps_data.longitude.toFixed(6)}`, 20, 120);
+//             }
+
+//             // Capture and add map snapshot
+//             leafletImage(map, function (err, canvas) {
+//                 if (err) {
+//                     console.error('Error capturing map snapshot:', err);
+//                     alert('Failed to include the map snapshot in the report.');
+//                     doc.save('Baggage_Report.pdf');
+//                 } else {
+//                     const imgData = canvas.toDataURL('image/png');
+//                     doc.addImage(imgData, 'PNG', 15, 140, 180, 100); // Add map image
+//                     doc.save('Baggage_Report.pdf'); // Save the PDF
+//                 }
+//             });
+//         })
+//         .catch(error => {
+//             console.error('Error generating report:', error);
+//             alert('Failed to download the report. Please try again.');
+//         });
+// }
+function downloadReport() {
+    const deviceID = document.getElementById('deviceID').value;
+    if (!deviceID) {
+        alert('Please enter a Device ID before downloading the report.');
+        return;
+    }
+
+    fetch(`http://localhost:5000/api/data?device_id=${deviceID}`)
+        .then(response => response.json())
+        .then(async data => {
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+
+            // Add border
+            doc.setLineWidth(1);
+            doc.setDrawColor(255, 255, 255);
+            doc.rect(5, 5, 200, 287);
+
+            // Add title
+            doc.setFillColor(0, 0, 0);
+            doc.rect(0, 0, 210, 297, 'F');
+            doc.setTextColor(255, 255, 255);
+            doc.setFontSize(16);
+            doc.text('Baggage Report', 105, 20, { align: 'center' });
+
+            // Add user details
+            doc.setFontSize(12);
+            doc.text(`Device ID: ${deviceID}`, 20, 40);
+            doc.text(`Temperature: ${data.sensor_data.temperature.toFixed(2)} °C`, 20, 50);
+            doc.text(`Acceleration X: ${data.sensor_data.acceleration.x.toFixed(2)} m/s²`, 20, 60);
+            doc.text(`Acceleration Y: ${data.sensor_data.acceleration.y.toFixed(2)} m/s²`, 20, 70);
+            doc.text(`Acceleration Z: ${data.sensor_data.acceleration.z.toFixed(2)} m/s²`, 20, 80);
+
+            // Geocode location to find the nearest airport
+            if (data.gps_data) {
+                const { latitude, longitude } = data.gps_data;
+                const location = await fetch(`https://api.opencagedata.com/geocode/v1/json?q=${latitude}+${longitude}&key=YOUR_API_KEY`)
+                    .then(res => res.json())
+                    .then(res => res.results[0]?.formatted || 'Unknown Location');
+
+                doc.text(`Last Location: ${location}`, 20, 100);
+                doc.text(`Latitude: ${latitude.toFixed(6)}`, 20, 110);
+                doc.text(`Longitude: ${longitude.toFixed(6)}`, 20, 120);
+            }
+
+            // Capture and add map snapshot
+            leafletImage(map, function (err, canvas) {
+                if (err) {
+                    console.error('Error capturing map snapshot:', err);
+                    alert('Failed to include the map snapshot in the report.');
+                } else {
+                    const imgData = canvas.toDataURL('image/png');
+                    doc.addImage(imgData, 'PNG', 15, 140, 180, 100);
+                }
+                doc.save('Baggage_Report.pdf');
+            });
+        })
+        .catch(error => {
+            console.error('Error generating report:', error);
+            alert('Failed to download the report. Please try again.');
+        });
+}
+
+
+
+        initCharts();
+        initMap();
+    </script>
+</body>
+</html>
