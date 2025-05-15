@@ -75,6 +75,7 @@ python app.py
 
 | Name | Role |
 |------|------|
+| Dr Pravin Game | Guide , Main Support |
 | Prathamesh Kshirsagar | Project Lead, Frontend Developer |
 | Trupti Gunjal | Frontend Developer, Data Integration Expert |
 
